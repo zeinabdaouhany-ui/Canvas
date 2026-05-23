@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>AEGIS Strategy Canvas Studio</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root {
+    --navy:#1E2A4A; --gold:#A8801C; --ox:#8B2635; --green:#2D5A3D;
+    --cream:#F4F1EA; --paper:#FBFAF6; --ink:#1A1A1F; --mute:#6B6B72; --rule:#D8D2C5;
+  }
+  body { background:var(--cream); color:var(--ink); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, Inter, Arial, sans-serif; }
+  .serif { font-family: ui-serif, Georgia, "Times New Roman", serif; }
+  .mono  { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .navy-bg{background:var(--navy)} .gold-bg{background:var(--gold)}
+  .navy{color:var(--navy)} .gold{color:var(--gold)} .ox{color:var(--ox)} .green{color:var(--green)} .mute{color:var(--mute)}
+  .paper{background:var(--paper)}
+  .tab-active { background:var(--navy); color:#fff; }
+  .tab-active .tab-num { color:var(--gold); }
+  textarea, input, select { background:#fff; border:1px solid var(--rule); border-radius:6px; padding:6px 8px; width:100%; font-size:13px; color:var(--ink); }
+  textarea:focus, input:focus, select:focus { outline:none; border-color:var(--navy); }
+  .field-label { font-size:10px; font-weight:700; letter-spacing:0.08em; color:var(--mute); text-transform:uppercase; }
+  button.primary { background:var(--navy); color:#fff; padding:6px 12px; border-radius:6px; font-weight:600; font-size:12px; }
+  button.primary:hover { background:#2a3a60; }
+  button.ghost { background:transparent; color:var(--navy); padding:6px 10px; border-radius:6px; font-size:12px; border:1px solid var(--rule); }
+  button.ghost:hover { background:var(--paper); }
+  .canvas-block {
+    background: var(--paper); border:1px solid var(--rule); border-radius:8px; padding:10px;
+    display:flex; flex-direction:column; min-height:160px;
+  }
+  .block-title { font-size:11px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color: var(--navy); display:flex; align-items:center; gap:6px; margin-bottom:6px; }
+  .block-icon { font-size:14px; }
+  .block-hint { font-size:10px; color:var(--mute); font-style:italic; margin-bottom:8px; line-height:1.3; }
+  .item { background:#fff; border:1px solid var(--rule); border-radius:4px; padding:6px 8px; font-size:12px; margin-bottom:4px; display:flex; align-items:flex-start; gap:6px; line-height:1.35; }
+  .item-text { flex:1; }
+  .item-x { font-size:14px; color:var(--ox); cursor:pointer; line-height:1; }
+  .linked-tag { display:inline-block; font-size:9px; padding:1px 6px; border-radius:9999px; background: rgba(168,128,28,0.15); color:var(--gold); font-weight:600; letter-spacing:0.04em; margin-left:4px; }
+  .add-input { width:100%; font-size:12px; padding:5px 8px; border:1px dashed var(--rule); border-radius:4px; background:transparent; }
+  .add-input:focus { border-color:var(--navy); border-style:solid; background:#fff; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useMemo } = React;
+
+// ─── Blank state ─────────────────────────────────────────────────────
+const blank = () => ({
+  meta: { name: "" },
+  // BMC
+  bmc: {
+    customerSegments: [],
+    valuePropositions: [],
+    channels: [],
+    customerRelationships: [],
+    revenueStreams: [],
+    keyResources: [],
+    keyActivities: [],
+    keyPartners: [],
+    costStructure: [],
+  },
+  // VPC
+  vpc: {
+    customerJobs: [],
+    pains: [],
+    gains: [],
+    products: [],
+    painRelievers: [],
+    gainCreators: [],
+  },
+  // OMC
+  omc: {
+    processes: [],
+    organisation: [],
+    locations: [],
+    information: [],
+    suppliers: [],
+    management: [],
+  },
+});
+
+// ─── Cross-linking rules ─────────────────────────────────────────────
+// Maps source field -> { targetCanvas, targetField, prefix (optional) }
+// When an item is added in source, a suggestion appears (toggleable) in target.
+const LINKS = {
+  // VPC products feed BMC valuePropositions
+  "vpc.products":       { target: "bmc.valuePropositions", label: "from VPC" },
+  "vpc.painRelievers":  { target: "bmc.valuePropositions", label: "from VPC" },
+  "vpc.gainCreators":   { target: "bmc.valuePropositions", label: "from VPC" },
+  // BMC key activities and resources feed OMC
+  "bmc.keyActivities":  { target: "omc.processes",        label: "from BMC" },
+  "bmc.keyResources":   { target: "omc.organisation",     label: "from BMC" },
+  "bmc.keyPartners":    { target: "omc.suppliers",        label: "from BMC" },
+};
+
+// ─── App ─────────────────────────────────────────────────────────────
+function App() {
+  const [state, setState] = useState(blank());
+  const [tab, setTab] = useState("bmc");
+
+  const exportJson = () => {
+    const blob = new Blob([JSON.stringify(state, null, 2)], {type:"application/json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (state.meta.name || "canvases") + ".json";
+    a.click();
+  };
+  const importJson = (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    const r = new FileReader();
+    r.onload = ev => { try { setState(JSON.parse(ev.target.result)); } catch { alert("Invalid JSON."); } };
+    r.readAsText(f);
+  };
+
+  // Cross-link: when item is added to a "source" field, also add to target field
+  const addItem = (path, text) => {
+    if (!text || !text.trim()) return;
+    setState(s => {
+      const n = JSON.parse(JSON.stringify(s));
+      const [canvas, field] = path.split(".");
+      n[canvas][field].push({ id: Math.random().toString(36).slice(2,9), text: text.trim(), linkedFrom: null });
+      // propagate to linked target if defined
+      if (LINKS[path]) {
+        const [tc, tf] = LINKS[path].target.split(".");
+        n[tc][tf].push({
+          id: Math.random().toString(36).slice(2,9),
+          text: text.trim(),
+          linkedFrom: LINKS[path].label,
+        });
+      }
+      return n;
+    });
+  };
+  const removeItem = (path, id) => {
+    setState(s => {
+      const n = JSON.parse(JSON.stringify(s));
+      const [c, f] = path.split(".");
+      n[c][f] = n[c][f].filter(x=>x.id!==id);
+      return n;
+    });
+  };
+
+  const tabs = [
+    { id:"bmc", n:"01", label:"Business Model Canvas", subtitle:"Osterwalder & Pigneur, 2010" },
+    { id:"vpc", n:"02", label:"Value Proposition Canvas", subtitle:"Osterwalder et al., 2014" },
+    { id:"omc", n:"03", label:"Operating Model Canvas", subtitle:"Campbell et al., 2017" },
+    { id:"out", n:"04", label:"Export", subtitle:"Markdown / JSON" },
+  ];
+
+  return (
+    <div className="min-h-screen">
+      {/* Header */}
+      <header className="navy-bg text-white">
+        <div className="max-w-7xl mx-auto px-6 py-5 flex items-center justify-between gap-6">
+          <div>
+            <div className="mono text-xs gold" style={{letterSpacing:"0.18em"}}>AEGIS · STRATEGY CANVAS STUDIO</div>
+            <h1 className="serif text-2xl mt-1">Three Canvases, One Studio</h1>
+            <p className="text-xs mt-1" style={{color:"#cfd3df"}}>Business Model Canvas, Value Proposition Canvas, and Operating Model Canvas. Cross-linked: items entered in one canvas propagate to the next.</p>
+          </div>
+          <div className="flex gap-2 items-center">
+            <input value={state.meta.name} onChange={e=>setState(s=>({...s, meta:{...s.meta, name:e.target.value}}))} placeholder="Project / business name" style={{background:"#fff", color:"var(--ink)", border:"none", padding:"6px 10px", borderRadius:"6px", fontSize:"13px", minWidth:240}}/>
+            <label className="cursor-pointer" style={{background:"#fff", color:"var(--navy)", padding:"6px 10px", borderRadius:"6px", fontSize:"12px", fontWeight:600}}>
+              Import JSON
+              <input type="file" accept="application/json" onChange={importJson} className="hidden" />
+            </label>
+            <button onClick={exportJson} className="primary" style={{background:"var(--gold)"}}>Save JSON</button>
+          </div>
+        </div>
+        <nav className="max-w-7xl mx-auto px-6 pb-0 flex flex-wrap gap-1">
+          {tabs.map(t => (
+            <button key={t.id} onClick={()=>setTab(t.id)}
+              className={`px-3 py-2 text-sm rounded-t-md flex items-center gap-2 ${tab===t.id ? "tab-active" : ""}`}
+              style={tab===t.id ? {} : {background:"#2a3a60", color:"#cfd3df"}}>
+              <span className="mono text-xs tab-num" style={{color: tab===t.id ? "var(--gold)" : "#9ba3b8"}}>{t.n}</span>
+              <div className="text-left">
+                <div className="font-medium leading-tight">{t.label}</div>
+                <div className="text-xs leading-tight" style={{color: tab===t.id ? "#cfd3df" : "#9ba3b8"}}>{t.subtitle}</div>
+              </div>
+            </button>
+          ))}
+        </nav>
+      </header>
+
+      <main className="max-w-7xl mx-auto px-4 py-6">
+        {tab==="bmc" && <BMC state={state} addItem={addItem} removeItem={removeItem} />}
+        {tab==="vpc" && <VPC state={state} addItem={addItem} removeItem={removeItem} />}
+        {tab==="omc" && <OMC state={state} addItem={addItem} removeItem={removeItem} />}
+        {tab==="out" && <ExportTab state={state} />}
+      </main>
+
+      <footer className="max-w-7xl mx-auto px-6 py-6 text-xs mute border-t" style={{borderColor:"var(--rule)"}}>
+        References: Osterwalder, A. and Pigneur, Y. (2010), <i>Business Model Generation</i>, Wiley · Osterwalder, A., Pigneur, Y., Bernarda, G. and Smith, A. (2014), <i>Value Proposition Design</i>, Wiley · Campbell, A., Lancelott, M. and Gutierrez, M. (2017), <i>Operating Model Canvas</i>, Van Haren.
+      </footer>
+    </div>
+  );
+}
+
+// ─── A single block in any canvas ────────────────────────────────────
+function Block({ title, hint, icon, items, path, addItem, removeItem, color, span, hSpan }) {
+  const [val, setVal] = useState("");
+  const colorMap = { navy:"var(--navy)", gold:"var(--gold)", ox:"var(--ox)", green:"var(--green)" };
+  return (
+    <div className="canvas-block" style={{
+      gridColumn: span ? `span ${span}` : undefined,
+      gridRow: hSpan ? `span ${hSpan}` : undefined,
+      borderTop: `3px solid ${colorMap[color] || "var(--navy)"}`,
+    }}>
+      <div className="block-title" style={{color: colorMap[color] || "var(--navy)"}}>
+        <span className="block-icon">{icon}</span>
+        <span>{title}</span>
+      </div>
+      <div className="block-hint">{hint}</div>
+      <div className="flex-1 overflow-auto">
+        {items.map(it => (
+          <div key={it.id} className="item">
+            <div className="item-text">
+              {it.text}
+              {it.linkedFrom && <span className="linked-tag">↻ {it.linkedFrom}</span>}
+            </div>
+            <span className="item-x" onClick={()=>removeItem(path, it.id)}>×</span>
+          </div>
+        ))}
+      </div>
+      <input className="add-input mt-2" placeholder="+ add"
+        value={val}
+        onChange={e=>setVal(e.target.value)}
+        onKeyDown={e => { if (e.key==="Enter" && val.trim()) { addItem(path, val); setVal(""); } }}
+      />
+    </div>
+  );
+}
+
+// ─── BMC ─────────────────────────────────────────────────────────────
+function BMC({ state, addItem, removeItem }) {
+  return (
+    <div className="space-y-3">
+      <CanvasHeading
+        title="Business Model Canvas"
+        subtitle="Nine blocks. The right half describes value and customers; the left half describes infrastructure and partners; the bottom describes the money."
+        ref_="Osterwalder & Pigneur, Business Model Generation (2010)"
+      />
+      <div className="grid grid-cols-10 gap-3" style={{minHeight: 640}}>
+        <Block path="bmc.keyPartners" title="Key Partners" icon="🔗" color="navy" span={2} hSpan={2}
+          hint="Who supplies what we cannot produce ourselves. Strategic alliances, key suppliers."
+          items={state.bmc.keyPartners} addItem={addItem} removeItem={removeItem}/>
+        <Block path="bmc.keyActivities" title="Key Activities" icon="⚙" color="navy" span={2}
+          hint="The most important things we must do to deliver the value proposition."
+          items={state.bmc.keyActivities} addItem={addItem} removeItem={removeItem}/>
+        <Block path="bmc.valuePropositions" title="Value Propositions" icon="◆" color="gold" span={2} hSpan={2}
+          hint="The bundle of products and services that creates value for a customer segment."
+          items={state.bmc.valuePropositions} addItem={addItem} removeItem={removeItem}/>
+        <Block path="bmc.customerRelationships" title="Customer Relationships" icon="✦" color="green" span={2}
+          hint="The types of relationships established with each customer segment."
+          items={state.bmc.customerRelationships} addItem={addItem} removeItem={removeItem}/>
+        <Block path="bmc.customerSegments" title="Customer Segments" icon="◉" color="green" span={2} hSpan={2}
+          hint="The different groups of people or organisations the business serves."
+          items={state.bmc.customerSegments} addItem={addItem} removeItem={removeItem}/>
+        <Block path="bmc.keyResources" title="Key Resources" icon="◈" color="navy" span={2}
+          hint="The most important assets required: physical, intellectual, human, financial."
+          items={state.bmc.keyResources} addItem={addItem} removeItem={removeItem}/>
+        <Block path="bmc.channels" title="Channels" icon="→" color="green" span={2}
+          hint="How the business reaches its customer segments to deliver the value proposition."
+          items={state.bmc.channels} addItem={addItem} removeItem={removeItem}/>
+        <Block path="bmc.costStructure" title="Cost Structure" icon="−" color="ox" span={5}
+          hint="The main costs incurred to operate the business model."
+          items={state.bmc.costStructure} addItem={addItem} removeItem={removeItem}/>
+        <Block path="bmc.revenueStreams" title="Revenue Streams" icon="+" color="ox" span={5}
+          hint="The cash the business generates from each customer segment."
+          items={state.bmc.revenueStreams} addItem={addItem} removeItem={removeItem}/>
+      </div>
+      <CrossLinkNote text="Items added in Value Propositions, Key Activities, Key Resources, and Key Partners will appear, tagged, in the Value Proposition Canvas and Operating Model Canvas."/>
+    </div>
+  );
+}
+
+// ─── VPC ─────────────────────────────────────────────────────────────
+function VPC({ state, addItem, removeItem }) {
+  return (
+    <div className="space-y-3">
+      <CanvasHeading
+        title="Value Proposition Canvas"
+        subtitle="Two halves. The Customer Profile (right) describes what the customer does, fears, and wants. The Value Map (left) describes how the offer responds. The fit is the test."
+        ref_="Osterwalder, Pigneur, Bernarda & Smith, Value Proposition Design (2014)"
+      />
+      <div className="grid grid-cols-2 gap-6">
+        {/* Value Map */}
+        <div>
+          <div className="text-center mb-2">
+            <div className="inline-block px-4 py-1 rounded-full text-xs font-bold tracking-wider" style={{background:"var(--navy)", color:"#fff"}}>VALUE MAP — what we offer</div>
+          </div>
+          <div className="grid grid-cols-1 gap-3" style={{minHeight: 600}}>
+            <Block path="vpc.products" title="Products & Services" icon="◆" color="navy"
+              hint="The list of all products and services the value proposition is built around."
+              items={state.vpc.products} addItem={addItem} removeItem={removeItem}/>
+            <Block path="vpc.painRelievers" title="Pain Relievers" icon="−" color="ox"
+              hint="How the products and services alleviate specific customer pains."
+              items={state.vpc.painRelievers} addItem={addItem} removeItem={removeItem}/>
+            <Block path="vpc.gainCreators" title="Gain Creators" icon="+" color="green"
+              hint="How the products and services produce customer gains."
+              items={state.vpc.gainCreators} addItem={addItem} removeItem={removeItem}/>
+          </div>
+        </div>
+        {/* Customer Profile */}
+        <div>
+          <div className="text-center mb-2">
+            <div className="inline-block px-4 py-1 rounded-full text-xs font-bold tracking-wider" style={{background:"var(--gold)", color:"#fff"}}>CUSTOMER PROFILE — what they need</div>
+          </div>
+          <div className="grid grid-cols-1 gap-3" style={{minHeight: 600}}>
+            <Block path="vpc.customerJobs" title="Customer Jobs" icon="◉" color="gold"
+              hint="The tasks customers are trying to perform, the problems they want to solve, the needs they want to satisfy. Functional, social, emotional."
+              items={state.vpc.customerJobs} addItem={addItem} removeItem={removeItem}/>
+            <Block path="vpc.pains" title="Pains" icon="!" color="ox"
+              hint="Bad outcomes, risks, and obstacles related to customer jobs. What annoys, frustrates, or prevents them."
+              items={state.vpc.pains} addItem={addItem} removeItem={removeItem}/>
+            <Block path="vpc.gains" title="Gains" icon="★" color="green"
+              hint="Outcomes and benefits customers want. Required, expected, desired, unexpected."
+              items={state.vpc.gains} addItem={addItem} removeItem={removeItem}/>
+          </div>
+        </div>
+      </div>
+      <FitCheck vpc={state.vpc}/>
+      <CrossLinkNote text="Products, Pain Relievers, and Gain Creators added here will appear, tagged, in the Business Model Canvas under Value Propositions."/>
+    </div>
+  );
+}
+
+function FitCheck({ vpc }) {
+  const score = Math.min(
+    vpc.products.length + vpc.painRelievers.length + vpc.gainCreators.length,
+    vpc.customerJobs.length + vpc.pains.length + vpc.gains.length
+  );
+  const total = vpc.products.length + vpc.painRelievers.length + vpc.gainCreators.length + vpc.customerJobs.length + vpc.pains.length + vpc.gains.length;
+  if (total === 0) return null;
+  const ratio = total > 0 ? score / Math.max(total/2, 1) : 0;
+  return (
+    <div className="card p-3 mt-3" style={{background:"var(--paper)", border:"1px solid var(--rule)", borderRadius:8}}>
+      <div className="text-xs font-bold tracking-wider gold">FIT CHECK</div>
+      <div className="text-sm mt-1">
+        Customer side: {vpc.customerJobs.length} jobs, {vpc.pains.length} pains, {vpc.gains.length} gains.
+        Value-map side: {vpc.products.length} products, {vpc.painRelievers.length} pain relievers, {vpc.gainCreators.length} gain creators.
+      </div>
+      <div className="text-xs mute mt-1 italic">Fit is achieved when each customer pain has at least one pain reliever and each customer gain has at least one gain creator. A pain or gain without a corresponding response is a fit gap.</div>
+    </div>
+  );
+}
+
+// ─── OMC ─────────────────────────────────────────────────────────────
+function OMC({ state, addItem, removeItem }) {
+  return (
+    <div className="space-y-3">
+      <CanvasHeading
+        title="Operating Model Canvas"
+        subtitle="Six blocks (POLISM). Processes, Organisation, Locations, Information, Suppliers, Management. How the business actually delivers what the BMC describes."
+        ref_="Campbell, Lancelott & Gutierrez, Operating Model Canvas (2017)"
+      />
+      <div className="grid grid-cols-6 gap-3" style={{minHeight: 520}}>
+        <Block path="omc.processes" title="Processes" icon="⚙" color="navy" span={2}
+          hint="The value-delivery chain. What gets done, in what sequence, by whom, to produce the value proposition."
+          items={state.omc.processes} addItem={addItem} removeItem={removeItem}/>
+        <Block path="omc.organisation" title="Organisation" icon="◈" color="navy" span={2}
+          hint="The structure, roles, capabilities, and culture that execute the processes."
+          items={state.omc.organisation} addItem={addItem} removeItem={removeItem}/>
+        <Block path="omc.locations" title="Locations" icon="◉" color="green" span={2}
+          hint="Where the work happens. Geography, sites, footprint, remote vs on-premises."
+          items={state.omc.locations} addItem={addItem} removeItem={removeItem}/>
+        <Block path="omc.information" title="Information" icon="◆" color="gold" span={3}
+          hint="The data, systems, and information flows that support the operating model."
+          items={state.omc.information} addItem={addItem} removeItem={removeItem}/>
+        <Block path="omc.suppliers" title="Suppliers" icon="🔗" color="ox" span={3}
+          hint="External partners delivering inputs and services to the operation."
+          items={state.omc.suppliers} addItem={addItem} removeItem={removeItem}/>
+        <Block path="omc.management" title="Management Systems" icon="✦" color="navy" span={6}
+          hint="Planning, performance management, decision-making, governance. How the operation is steered and controlled."
+          items={state.omc.management} addItem={addItem} removeItem={removeItem}/>
+      </div>
+      <CrossLinkNote text="Items appearing here tagged 'from BMC' were added in Key Activities, Key Resources, or Key Partners on the BMC. Edit either side; entries can be added directly here too."/>
+    </div>
+  );
+}
+
+// ─── Export ──────────────────────────────────────────────────────────
+function ExportTab({ state }) {
+  const md = useMemo(() => buildMarkdown(state), [state]);
+  const downloadMd = () => {
+    const blob = new Blob([md], { type:"text/markdown" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = (state.meta.name || "canvases") + ".md";
+    a.click();
+  };
+  return (
+    <section className="card p-5" style={{background:"var(--paper)", border:"1px solid var(--rule)", borderRadius:8}}>
+      <h2 className="serif text-xl navy mb-2">Export</h2>
+      <p className="text-xs mute italic mb-4">All three canvases consolidated into one Markdown document. Use the Save JSON button in the header to checkpoint your work.</p>
+      <div className="flex gap-2 mb-4">
+        <button onClick={downloadMd} className="primary">Download Markdown</button>
+        <button onClick={()=>navigator.clipboard.writeText(md)} className="ghost">Copy to clipboard</button>
+      </div>
+      <pre className="card p-4 text-xs whitespace-pre-wrap overflow-auto mono" style={{maxHeight:600, background:"#fff", border:"1px solid var(--rule)", borderRadius:6}}>{md}</pre>
+    </section>
+  );
+}
+
+function buildMarkdown(s) {
+  const L = [];
+  L.push(`# Strategy Canvases · ${s.meta.name || "[Untitled]"}`);
+  L.push(`\n_Built with AEGIS Strategy Canvas Studio. Three canvases, cross-linked._`);
+
+  L.push(`\n---\n## 1 · Business Model Canvas`);
+  L.push(`_After Osterwalder & Pigneur (2010), Business Model Generation._\n`);
+  const bmcOrder = [
+    ["customerSegments","Customer Segments"],
+    ["valuePropositions","Value Propositions"],
+    ["channels","Channels"],
+    ["customerRelationships","Customer Relationships"],
+    ["revenueStreams","Revenue Streams"],
+    ["keyResources","Key Resources"],
+    ["keyActivities","Key Activities"],
+    ["keyPartners","Key Partners"],
+    ["costStructure","Cost Structure"],
+  ];
+  bmcOrder.forEach(([k,label]) => {
+    L.push(`\n### ${label}`);
+    if (s.bmc[k].length===0) L.push(`_(none)_`);
+    else s.bmc[k].forEach(it => L.push(`- ${it.text}${it.linkedFrom ? ` _(${it.linkedFrom})_` : ""}`));
+  });
+
+  L.push(`\n---\n## 2 · Value Proposition Canvas`);
+  L.push(`_After Osterwalder, Pigneur, Bernarda & Smith (2014), Value Proposition Design._\n`);
+  L.push(`\n### Customer Profile`);
+  ["customerJobs","pains","gains"].forEach(k => {
+    const labels = {customerJobs:"Customer Jobs", pains:"Pains", gains:"Gains"};
+    L.push(`\n#### ${labels[k]}`);
+    if (s.vpc[k].length===0) L.push(`_(none)_`);
+    else s.vpc[k].forEach(it => L.push(`- ${it.text}`));
+  });
+  L.push(`\n### Value Map`);
+  ["products","painRelievers","gainCreators"].forEach(k => {
+    const labels = {products:"Products & Services", painRelievers:"Pain Relievers", gainCreators:"Gain Creators"};
+    L.push(`\n#### ${labels[k]}`);
+    if (s.vpc[k].length===0) L.push(`_(none)_`);
+    else s.vpc[k].forEach(it => L.push(`- ${it.text}`));
+  });
+
+  L.push(`\n---\n## 3 · Operating Model Canvas`);
+  L.push(`_After Campbell, Lancelott & Gutierrez (2017), Operating Model Canvas. POLISM._\n`);
+  const omcOrder = [
+    ["processes","Processes"],
+    ["organisation","Organisation"],
+    ["locations","Locations"],
+    ["information","Information"],
+    ["suppliers","Suppliers"],
+    ["management","Management Systems"],
+  ];
+  omcOrder.forEach(([k,label]) => {
+    L.push(`\n### ${label}`);
+    if (s.omc[k].length===0) L.push(`_(none)_`);
+    else s.omc[k].forEach(it => L.push(`- ${it.text}${it.linkedFrom ? ` _(${it.linkedFrom})_` : ""}`));
+  });
+  return L.join("\n");
+}
+
+// ─── Small primitives ───────────────────────────────────────────────
+function CanvasHeading({ title, subtitle, ref_ }) {
+  return (
+    <div className="mb-2">
+      <h2 className="serif text-xl navy">{title}</h2>
+      <p className="text-xs mute italic">{subtitle}</p>
+      <p className="mono text-xs gold mt-1" style={{letterSpacing:"0.04em"}}>{ref_}</p>
+    </div>
+  );
+}
+function CrossLinkNote({ text }) {
+  return (
+    <div className="text-xs italic mt-2 p-2 rounded" style={{background:"#fdf6e3", border:"1px solid var(--gold)", color:"var(--ink)"}}>
+      <b className="gold">CROSS-LINK</b> · {text}
+    </div>
+  );
+}
+
+// ─── Mount ──────────────────────────────────────────────────────────
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(<App />);
+</script>
+</body>
+</html>
